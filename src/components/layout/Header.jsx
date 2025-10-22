@@ -1,15 +1,35 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Home, FileText } from 'lucide-react';
-import { useState } from 'react';
+import { Search, Home, FileText, User, LogOut, LogIn } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import useAuthStore from '../../store/useAuthStore';
+import { isSupabaseConfigured } from '../../services/supabase';
 
 function Header() {
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState('');
+  const { user, isAuthenticated, signOut, initialize } = useAuthStore();
+  const [showUserMenu, setShowUserMenu] = useState(false);
+
+  useEffect(() => {
+    if (isSupabaseConfigured()) {
+      initialize();
+    }
+  }, [initialize]);
 
   const handleSearch = (e) => {
     e.preventDefault();
     if (searchInput.trim()) {
       navigate(`/search?q=${encodeURIComponent(searchInput.trim())}`);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      setShowUserMenu(false);
+      navigate('/');
+    } catch (error) {
+      console.error('Sign out error:', error);
     }
   };
 
@@ -51,6 +71,62 @@ function Header() {
             >
               <Home className="w-5 h-5" />
             </Link>
+
+            {/* Auth Section */}
+            {isSupabaseConfigured() && (
+              <>
+                {isAuthenticated && user ? (
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowUserMenu(!showUserMenu)}
+                      className="flex items-center space-x-2 p-2 text-gray-700 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                    >
+                      <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                        <User className="w-5 h-5 text-white" />
+                      </div>
+                      <span className="hidden sm:block text-sm font-medium">
+                        {user.user_metadata?.display_name || user.email}
+                      </span>
+                    </button>
+
+                    {/* User Menu Dropdown */}
+                    {showUserMenu && (
+                      <>
+                        {/* Backdrop */}
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setShowUserMenu(false)}
+                        />
+                        {/* Menu */}
+                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+                          <div className="px-4 py-2 border-b border-gray-200">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {user.user_metadata?.display_name || 'User'}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                          </div>
+                          <button
+                            onClick={handleSignOut}
+                            className="w-full px-4 py-2 text-left text-sm text-red-700 hover:bg-red-50 flex items-center space-x-2"
+                          >
+                            <LogOut className="w-4 h-4" />
+                            <span>ออกจากระบบ</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <Link
+                    to="/login"
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span className="text-sm font-medium">เข้าสู่ระบบ</span>
+                  </Link>
+                )}
+              </>
+            )}
           </nav>
         </div>
       </div>
