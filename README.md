@@ -86,7 +86,7 @@ fmgs-registration-doc-gov/
 ---
 
 ## 📝 Google Sheets Setup
-
+url google sheet: https://docs.google.com/spreadsheets/d/1BvX6lFsf3HrDvlopXt7PiyccVNM6-G1fNTIge3A_u6Y/edit?gid=1324719925#gid=1324719925
 ### 1. เตรียม Google Sheets
 
 ข้อมูลใน Google Sheets ต้องมีโครงสร้างดังนี้:
