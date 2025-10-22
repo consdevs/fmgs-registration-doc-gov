@@ -4,17 +4,105 @@ import {
   GOOGLE_SHEETS_CONFIG,
   STATUS_CATEGORIES,
   STATUS_RANGES,
-  COLUMN_MAPPING,
+  COLUMN_KEYWORDS,
+  DEFAULT_COLUMN_MAPPING,
 } from '../config/constants';
+
+// Cache for column mapping
+let cachedColumnMapping = null;
 
 /**
  * Constructs the Google Sheets API URL
+ * @param {string} range - Range to fetch (e.g., 'A:Z' or 'A1:H1')
  * @returns {string} Full API URL
  */
-const getApiUrl = () => {
-  const { SHEET_ID, SHEET_NAME, RANGE, API_KEY } = GOOGLE_SHEETS_CONFIG;
-  const fullRange = `${SHEET_NAME}!${RANGE}`;
+const getApiUrl = (range) => {
+  const { SHEET_ID, SHEET_NAME, API_KEY } = GOOGLE_SHEETS_CONFIG;
+  const fullRange = `${SHEET_NAME}!${range}`;
   return `${API_BASE_URL}/${SHEET_ID}/values/${fullRange}?key=${API_KEY}`;
+};
+
+/**
+ * Detects column mapping from header row
+ * @param {Array} headers - Array of header strings
+ * @returns {Object} Column mapping object
+ */
+const detectColumnMapping = (headers) => {
+  const mapping = {};
+
+  // Try to match each required field with headers
+  Object.keys(COLUMN_KEYWORDS).forEach((field) => {
+    const keywords = COLUMN_KEYWORDS[field];
+
+    // Find the column index that matches any keyword
+    const columnIndex = headers.findIndex((header) => {
+      if (!header) return false;
+      const headerLower = header.toString().toLowerCase().trim();
+
+      return keywords.some((keyword) => {
+        const keywordLower = keyword.toLowerCase();
+        return headerLower.includes(keywordLower);
+      });
+    });
+
+    if (columnIndex !== -1) {
+      mapping[field] = columnIndex;
+    }
+  });
+
+  // Check if we found all required fields
+  const requiredFields = Object.keys(COLUMN_KEYWORDS);
+  const foundFields = Object.keys(mapping);
+
+  if (foundFields.length < requiredFields.length) {
+    console.warn(
+      `Auto-detection incomplete. Found ${foundFields.length}/${requiredFields.length} columns.`,
+      'Missing:', requiredFields.filter(f => !foundFields.includes(f))
+    );
+
+    // Use default mapping for missing fields
+    requiredFields.forEach((field) => {
+      if (!mapping[field]) {
+        mapping[field] = DEFAULT_COLUMN_MAPPING[field];
+      }
+    });
+  }
+
+  console.log('Detected column mapping:', mapping);
+  return mapping;
+};
+
+/**
+ * Fetches and caches column mapping from sheet headers
+ * @returns {Promise<Object>} Column mapping object
+ */
+const getColumnMapping = async () => {
+  if (cachedColumnMapping) {
+    return cachedColumnMapping;
+  }
+
+  try {
+    // Fetch only the first row (headers)
+    const headerRange = `${GOOGLE_SHEETS_CONFIG.HEADER_ROW}:${GOOGLE_SHEETS_CONFIG.HEADER_ROW}`;
+    const url = getApiUrl(headerRange);
+    const response = await axios.get(url);
+
+    if (response.data && response.data.values && response.data.values[0]) {
+      const headers = response.data.values[0];
+      cachedColumnMapping = detectColumnMapping(headers);
+      return cachedColumnMapping;
+    }
+
+    // Fallback to default mapping
+    console.warn('Could not fetch headers, using default column mapping');
+    cachedColumnMapping = DEFAULT_COLUMN_MAPPING;
+    return cachedColumnMapping;
+  } catch (error) {
+    console.error('Error fetching headers:', error);
+    console.warn('Using default column mapping');
+    cachedColumnMapping = DEFAULT_COLUMN_MAPPING;
+    return cachedColumnMapping;
+  }
 };
 
 /**
@@ -38,26 +126,27 @@ const getStatusCategory = (daysRemaining) => {
 /**
  * Transforms raw sheet data into structured registration objects
  * @param {Array} rows - Raw data from Google Sheets
+ * @param {Object} columnMapping - Column mapping object
  * @returns {Array} Array of registration objects
  */
-const transformSheetData = (rows) => {
+const transformSheetData = (rows, columnMapping) => {
   if (!rows || rows.length === 0) return [];
 
   return rows
     .filter(row => row && row.length > 0) // Filter out empty rows
     .map((row, index) => {
-      const daysRemaining = Number(row[COLUMN_MAPPING.DAYS_REMAINING]) || 0;
+      const daysRemaining = Number(row[columnMapping.DAYS_REMAINING]) || 0;
 
       return {
         id: index + 1,
         daysRemaining,
-        status: row[COLUMN_MAPPING.STATUS] || '-',
-        regCode: row[COLUMN_MAPPING.REG_CODE] || '-',
-        regNumber: row[COLUMN_MAPPING.REG_NUMBER] || '-',
-        tradeName: row[COLUMN_MAPPING.TRADE_NAME] || '-',
-        regType: row[COLUMN_MAPPING.REG_TYPE] || '-',
-        organization: row[COLUMN_MAPPING.ORGANIZATION] || '-',
-        expiryDate: row[COLUMN_MAPPING.EXPIRY_DATE] || '-',
+        status: row[columnMapping.STATUS] || '-',
+        regCode: row[columnMapping.REG_CODE] || '-',
+        regNumber: row[columnMapping.REG_NUMBER] || '-',
+        tradeName: row[columnMapping.TRADE_NAME] || '-',
+        regType: row[columnMapping.REG_TYPE] || '-',
+        organization: row[columnMapping.ORGANIZATION] || '-',
+        expiryDate: row[columnMapping.EXPIRY_DATE] || '-',
         statusCategory: getStatusCategory(daysRemaining),
       };
     });
@@ -69,18 +158,25 @@ const transformSheetData = (rows) => {
  */
 export const getRegistrations = async () => {
   try {
-    const url = getApiUrl();
+    // Step 1: Get column mapping (auto-detect or use cache)
+    const columnMapping = await getColumnMapping();
+
+    // Step 2: Fetch all data (skip header row)
+    const dataRange = `${GOOGLE_SHEETS_CONFIG.HEADER_ROW + 1}:${GOOGLE_SHEETS_CONFIG.DATA_RANGE.split(':')[1]}`;
+    const url = getApiUrl(dataRange);
     const response = await axios.get(url);
 
     if (!response.data || !response.data.values) {
       throw new Error('ไม่พบข้อมูลในชีท');
     }
 
-    const registrations = transformSheetData(response.data.values);
+    // Step 3: Transform data using detected column mapping
+    const registrations = transformSheetData(response.data.values, columnMapping);
 
     // Sort by days remaining (ascending - most urgent first)
     registrations.sort((a, b) => a.daysRemaining - b.daysRemaining);
 
+    console.log(`Loaded ${registrations.length} registrations from Google Sheets`);
     return registrations;
   } catch (error) {
     console.error('Error fetching registrations:', error);
